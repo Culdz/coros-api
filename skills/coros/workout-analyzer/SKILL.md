@@ -1,6 +1,6 @@
 ---
 name: workout-analyzer
-description: Analyze a single strength/musculation (or gym) session from a COROS webhook payload and produce a structured evaluation — an effort/consistency score, a comparison against the athlete's past strength sessions, concrete improvement vectors, and a suggested next session. The COROS payload is SESSION-LEVEL only (heart rate, duration, calories) — there is NO per-exercise/set/rep/weight data, so this is an effort-and-recovery analysis, not a volume/load analysis. Use whenever the user shares a strength activity payload (sportType "strength"/"gymCardio"/"gpsCardio"), asks to "évalue ma séance", "analyse ma muscu", "evaluate my workout", "comment ça s'est passé", or pastes an activity JSON with a strength sportType. Trigger even with no explicit question — they want an evaluation.
+description: Analyze a single strength/musculation (or gym) session from a COROS webhook payload and produce a structured evaluation — an effort/consistency score, a comparison against the athlete's past strength sessions, concrete improvement vectors, and a suggested next session. The COROS payload is SESSION-LEVEL only (heart rate, duration, calories) — there is NO per-exercise/set/rep/weight data, so this is an effort-and-recovery analysis, not a volume/load analysis. Use whenever the user shares a strength activity payload (sportType "strength"/"gymCardio"/"gpsCardio"), asks to "évalue ma séance", "analyse ma muscu", "evaluate my workout", "comment ça s'est passé", or pastes an activity JSON with a strength sportType. Trigger even with no explicit question — they want an evaluation. Also handle `event: history_backfill` with `sportCategory: "strength"` — a one-time batch of past strength sessions to seed the history.
 tags: [fitness, strength, musculation, gym, training, analytics, webhook]
 related_skills: [run-analyzer]
 ---
@@ -74,6 +74,19 @@ The athlete's strength history lives in a single JSON file the skill reads and a
 ## The `inactive` event
 
 If `event` is `inactive`, this isn't a session to score. The payload is `{ inactivity: { hoursSinceLastActivity, lastActivity } }`. Produce a short, encouraging nudge: note how long it's been (`hoursSinceLastActivity`), reference `lastActivity` if it carries detail, and suggest an easy way back in. No score, no history append.
+
+## The `history_backfill` event
+
+If `event` is `history_backfill`, this is a **one-time seed** of past sessions (sent once when the integration is set up), not a session to coach. The payload is `{ sportCategory: "strength", activities: [ ... ] }`. Ingest **every** entry in `activities[]` into the history file, dedup by `labelId`, then reply with **one** short confirmation (e.g. *"J'ai chargé tes N dernières séances de muscu — je connais ton historique maintenant 💪"*). Do not coach or score individual sessions.
+
+```bash
+HISTORY_PATH="${HERMES_HOME:-$HOME/.hermes}/workout-analyzer/history.json"
+mkdir -p "$(dirname "$HISTORY_PATH")"; [ -f "$HISTORY_PATH" ] || echo '{"sessions":[]}' > "$HISTORY_PATH"
+BATCH='<the activities array from the payload>'
+tmp="$(mktemp)"
+jq --argjson b "$BATCH" '.sessions = ((.sessions + $b) | unique_by(.labelId))' "$HISTORY_PATH" > "$tmp" && mv "$tmp" "$HISTORY_PATH"
+```
+If `jq` is unavailable, do the equivalent read-modify-write in Python (concatenate, keep one per `labelId`).
 
 ## Output format — a short coach's message
 

@@ -1,5 +1,6 @@
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
+import { BackfillHistoryCommandRunner } from './command-runner/backfill-history.command-runner';
 import { ExportActivitiesCommandRunner } from './command-runner/export-activities.command-runner';
 import { ExportTrainingScheduleCommandRunner } from './command-runner/export-training-schedule.command-runner';
 import { NotifyActivitiesCommandRunner } from './command-runner/notify-activities.command-runner';
@@ -18,6 +19,7 @@ import { NotifyConfigService } from './notify/notify.config';
     ExportActivitiesCommandRunner,
     ExportTrainingScheduleCommandRunner,
     NotifyActivitiesCommandRunner,
+    BackfillHistoryCommandRunner,
     DownloadFile,
     NotifyConfigService,
     Clock,

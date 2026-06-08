@@ -17,6 +17,8 @@ const MS_PER_HOUR = 1000 * 60 * 60;
 // Hermes routes payloads by the top-level `event_type` field (matched against the route's
 // `events` list). `event` below is our own sub-type so the agent can distinguish them.
 const WEBHOOK_EVENT_TYPE = 'activity';
+// Sport keys that belong to the strength skill; everything else is treated as endurance.
+const STRENGTH_SPORTS = new Set(['strength', 'gymCardio', 'gpsCardio']);
 
 // COROS activity dates are bare YYYYMMDD numbers with no time/zone. Anchor them at UTC
 // midnight so the inactivity threshold is independent of the host's timezone.
@@ -90,6 +92,55 @@ export class ActivityWatcher {
 
     await this.checkInactivity(state);
     await this.store.save(state);
+  }
+
+  /**
+   * One-time seed: enrich the last `days` of activities and send them to Hermes as two
+   * `history_backfill` batches (strength → workout-analyzer, endurance → run-analyzer) so the
+   * skills' history is populated immediately. Does not change the new-activity dedup state.
+   */
+  async backfill(days: number): Promise<void> {
+    const state = await this.store.load();
+    await this.ensureAuth(state);
+
+    const from = dayjs(this.clock.now()).subtract(days, 'day').toDate();
+    const { activities } = await this.coros.queryActivities({ from, sportTypes: [ALL_SPORT_TYPES] });
+    this.logger.log(`Backfill: enriching ${activities.length} activity(ies) from the last ${days} days`);
+
+    const enriched: ActivityPayload[] = [];
+    for (const activity of [...activities].sort((a, b) => b.date - a.date)) {
+      try {
+        enriched.push(await this.enrich(activity));
+      } catch (error) {
+        this.logger.warn(`Backfill enrich failed for ${activity.labelId}: ${error}`);
+      }
+    }
+
+    const strength = enriched.filter((p) => STRENGTH_SPORTS.has(p.sportType));
+    const endurance = enriched.filter((p) => !STRENGTH_SPORTS.has(p.sportType));
+
+    if (strength.length > 0) {
+      await this.sendBackfill('strength', strength);
+    }
+    if (endurance.length > 0) {
+      await this.sendBackfill('endurance', endurance);
+    }
+
+    await this.store.save(state);
+    this.logger.log(`Backfill sent: ${strength.length} strength, ${endurance.length} endurance`);
+  }
+
+  private async sendBackfill(sportCategory: 'strength' | 'endurance', activities: ActivityPayload[]): Promise<void> {
+    const ok = await this.notifier.notify({
+      event_type: WEBHOOK_EVENT_TYPE,
+      event: 'history_backfill',
+      source: 'coros',
+      sportCategory,
+      activities,
+    });
+    if (!ok) {
+      this.logger.warn(`Backfill batch '${sportCategory}' (${activities.length}) failed to deliver`);
+    }
   }
 
   private async ensureAuth(state: NotifierState): Promise<void> {

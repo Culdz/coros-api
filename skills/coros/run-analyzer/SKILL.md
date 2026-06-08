@@ -1,6 +1,6 @@
 ---
 name: run-analyzer
-description: Analyze a single running/endurance activity from a pre-digested FIT payload and produce a structured evaluation — a session score, a comparison against the athlete's past activities, concrete improvement vectors, and a suggested next session. Use this skill whenever the user shares an activity payload (fields like activity.distanceKm, avgPaceSecPerKm, avgHeartRate, etc.), asks to "evaluate my run", "analyze this session", "comment ça s'est passé", "compare to my last runs", or wants training feedback on a workout. Trigger even when the user just pastes activity JSON without an explicit question — they want an evaluation.
+description: Analyze a single running/endurance activity from a pre-digested FIT payload and produce a structured evaluation — a session score, a comparison against the athlete's past activities, concrete improvement vectors, and a suggested next session. Use this skill whenever the user shares an activity payload (fields like activity.distanceKm, avgPaceSecPerKm, avgHeartRate, etc.), asks to "evaluate my run", "analyze this session", "comment ça s'est passé", "compare to my last runs", or wants training feedback on a workout. Trigger even when the user just pastes activity JSON without an explicit question — they want an evaluation. Also handle `event: history_backfill` with `sportCategory: "endurance"` — a one-time batch of past runs/rides/swims to seed the history.
 ---
 
 # Run Analyzer
@@ -77,6 +77,19 @@ The athlete's history lives in a single JSON file the skill reads and appends to
 ## The `inactive` event
 
 If `event` is `inactive`, this is a 48h-idle nudge, not a run to evaluate. The payload is `{ inactivity: { hoursSinceLastActivity, lastActivity } }`. Send a short, warm "get back out there" message: note how long it's been, reference `lastActivity` if it has detail, suggest an easy way back. No score, no history append.
+
+## The `history_backfill` event
+
+If `event` is `history_backfill`, this is a **one-time seed** of past runs (sent once at setup), not a run to coach. The payload is `{ sportCategory: "endurance", activities: [ ... ] }`. Ingest **every** entry in `activities[]` into the history file, dedup by `labelId`, then reply with **one** short confirmation (e.g. *"J'ai chargé tes N dernières sorties — je connais ton historique maintenant 👌"*). Do not coach or score individual activities.
+
+```bash
+HISTORY_PATH="${HERMES_HOME:-$HOME/.hermes}/run-analyzer/history.json"
+mkdir -p "$(dirname "$HISTORY_PATH")"; [ -f "$HISTORY_PATH" ] || echo '{"activities":[]}' > "$HISTORY_PATH"
+BATCH='<the activities array from the payload>'
+tmp="$(mktemp)"
+jq --argjson b "$BATCH" '.activities = ((.activities + $b) | unique_by(.labelId))' "$HISTORY_PATH" > "$tmp" && mv "$tmp" "$HISTORY_PATH"
+```
+If `jq` is unavailable, do the equivalent read-modify-write in Python (concatenate, keep one per `labelId`).
 
 ## Output format — a short coach's message
 
