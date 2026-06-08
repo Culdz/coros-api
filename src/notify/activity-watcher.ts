@@ -70,7 +70,7 @@ export class ActivityWatcher {
     const activities = await this.queryRecentWithAuthRetry(state);
 
     if (state.seenLabelIds.length === 0) {
-      this.bootstrap(state, activities);
+      await this.bootstrap(state, activities);
       await this.checkInactivity(state);
       await this.store.save(state);
       return;
@@ -128,26 +128,45 @@ export class ActivityWatcher {
     return activities;
   }
 
-  private bootstrap(state: NotifierState, activities: Activity[]): void {
+  private async bootstrap(state: NotifierState, activities: Activity[]): Promise<void> {
     state.seenLabelIds = activities.map((activity) => activity.labelId);
     if (activities.length > 0) {
       const mostRecent = activities.reduce((a, b) => (a.date >= b.date ? a : b));
       state.lastActivityEndTime = yyyymmddToUtcIso(mostRecent.date);
       state.lastActivityLabelId = mostRecent.labelId;
+
+      // Backfill recent history (enriched, newest-first) so the FIRST real notification
+      // already carries context for the agent — without sending anything now.
+      const recent = [...activities].sort((a, b) => b.date - a.date).slice(0, this.config.recentHistoryCount);
+      const payloads: ActivityPayload[] = [];
+      for (const activity of recent) {
+        try {
+          payloads.push(await this.enrich(activity));
+        } catch (error) {
+          this.logger.warn(`Bootstrap enrich failed for ${activity.labelId}: ${error}`);
+        }
+      }
+      state.recentActivities = payloads;
     }
-    this.logger.log(`Bootstrap: seeded ${state.seenLabelIds.length} activity(ies); no notifications sent`);
+    this.logger.log(
+      `Bootstrap: seeded ${state.seenLabelIds.length} activity(ies); backfilled ${state.recentActivities.length} for history; no notifications sent`,
+    );
+  }
+
+  private async enrich(activity: Activity): Promise<ActivityPayload> {
+    const { fileUrl } = await this.coros.downloadActivityDetail({
+      labelId: activity.labelId,
+      sportType: activity.sportType,
+      fileType: FIT_FILE_TYPE,
+    });
+    const buffer = await this.fetchFitFile(fileUrl);
+    const metrics = await this.fitParser.parse(buffer);
+    return this.buildActivityPayload(activity, metrics);
   }
 
   private async processNewActivity(state: NotifierState, activity: Activity): Promise<void> {
     try {
-      const { fileUrl } = await this.coros.downloadActivityDetail({
-        labelId: activity.labelId,
-        sportType: activity.sportType,
-        fileType: FIT_FILE_TYPE,
-      });
-      const buffer = await this.fetchFitFile(fileUrl);
-      const metrics = await this.fitParser.parse(buffer);
-      const payload = this.buildActivityPayload(activity, metrics);
+      const payload = await this.enrich(activity);
 
       const ok = await this.notifier.notify({
         event_type: WEBHOOK_EVENT_TYPE,

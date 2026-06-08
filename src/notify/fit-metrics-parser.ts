@@ -9,8 +9,11 @@ export interface ActivityMetrics {
   avgPaceSecPerKm?: number;
   avgHeartRate?: number;
   maxHeartRate?: number;
+  minHeartRate?: number;
   elevationGainM?: number;
   calories?: number;
+  subSport?: string;
+  avgTemperature?: number;
 }
 
 function asNumber(value: unknown): number | undefined {
@@ -53,6 +56,11 @@ export function mapSessionToMetrics(session: Record<string, unknown>): ActivityM
     metrics.maxHeartRate = maxHr;
   }
 
+  const minHr = asNumber(session.min_heart_rate);
+  if (minHr !== undefined) {
+    metrics.minHeartRate = minHr;
+  }
+
   const ascent = asNumber(session.total_ascent);
   if (ascent !== undefined) {
     metrics.elevationGainM = ascent;
@@ -61,6 +69,15 @@ export function mapSessionToMetrics(session: Record<string, unknown>): ActivityM
   const calories = asNumber(session.total_calories);
   if (calories !== undefined) {
     metrics.calories = calories;
+  }
+
+  if (typeof session.sub_sport === 'string') {
+    metrics.subSport = session.sub_sport;
+  }
+
+  const temperature = asNumber(session.avg_temperature);
+  if (temperature !== undefined) {
+    metrics.avgTemperature = temperature;
   }
 
   return metrics;

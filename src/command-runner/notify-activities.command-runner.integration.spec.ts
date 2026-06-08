@@ -113,6 +113,10 @@ describe('notify-activities', () => {
     const state = await readState();
     expect(state.seenLabelIds).toEqual(['a1']);
     expect(state.lastActivityLabelId).toBe('a1');
+    // History is backfilled at bootstrap (enriched, no notification) so the first real
+    // activity already carries context.
+    expect(state.recentActivities).toHaveLength(1);
+    expect((state.recentActivities[0] as { labelId: string }).labelId).toBe('a1');
   });
 
   it('notifies for a new activity on a subsequent run', async () => {

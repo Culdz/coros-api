@@ -43,6 +43,32 @@ describe('mapSessionToMetrics', () => {
     expect(metrics).not.toHaveProperty('avgPaceSecPerKm');
   });
 
+  it('maps a real strength session (HR range, sub_sport, temperature; no distance)', () => {
+    const metrics = mapSessionToMetrics({
+      sub_sport: 'strength_training',
+      start_time: '2026-06-08T07:00:20.000Z',
+      total_timer_time: 2893.28,
+      total_calories: 277,
+      max_heart_rate: 127,
+      min_heart_rate: 81,
+      avg_heart_rate: 98,
+      avg_temperature: 27,
+    });
+
+    expect(metrics).toEqual({
+      subSport: 'strength_training',
+      startTime: '2026-06-08T07:00:20.000Z',
+      endTime: '2026-06-08T07:48:33.000Z',
+      durationSec: 2893,
+      avgHeartRate: 98,
+      maxHeartRate: 127,
+      minHeartRate: 81,
+      calories: 277,
+      avgTemperature: 27,
+    });
+    expect(metrics).not.toHaveProperty('distanceKm');
+  });
+
   it('returns an empty object for an empty session', () => {
     expect(mapSessionToMetrics({})).toEqual({});
   });
