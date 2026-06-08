@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -235,5 +235,50 @@ describe('notify-activities', () => {
     // After the first run it is 1; the second run must reuse the cached token (no new login),
     // so it stays at 1.
     expect(loginCount).toBe(1);
+  });
+
+  it('re-logs in when COROS rejects the cached token (result 1019)', async () => {
+    // Seed a fresh-but-invalid cached token so ensureAuth reuses it (no initial login).
+    await writeFile(
+      stateFile,
+      JSON.stringify({
+        version: 1,
+        seenLabelIds: [],
+        lastActivityEndTime: null,
+        lastActivityLabelId: null,
+        accessToken: 'stale-token',
+        accessTokenIssuedAt: NOW.toISOString(),
+        recentActivities: [],
+      }),
+    );
+
+    let queryCount = 0;
+    server.use(
+      http.post(`${COROS_API_BASE_URL}/account/login`, () => {
+        loginCount += 1;
+        return HttpResponse.json(buildLoginResponse());
+      }),
+      http.get(`${COROS_API_BASE_URL}/activity/query`, () => {
+        queryCount += 1;
+        if (queryCount === 1) {
+          // COROS signals an invalid token with HTTP 200 + result 1019 (no apiCode).
+          return HttpResponse.json({ result: '1019', message: 'Access token is invalid', tlogId: 'x' });
+        }
+        return HttpResponse.json(buildQueryActivitiesResponse({ activities: [buildActivity({ labelId: 'a1' })] }));
+      }),
+      http.post(`${COROS_API_BASE_URL}/activity/detail/download`, ({ request }) => {
+        const labelId = new URL(request.url).searchParams.get('labelId');
+        return HttpResponse.json(buildDownloadActivityDetailResponse(`${COROS_API_BASE_URL}/files/${labelId}.fit`));
+      }),
+      http.get(`${COROS_API_BASE_URL}/files/*`, () => new HttpResponse('fake-fit')),
+      http.post(HERMES_WEBHOOK, () => HttpResponse.json({ ok: true })),
+    );
+
+    await runCommand();
+
+    // The cached token was reused, rejected (1019), then a single re-login recovered it.
+    expect(loginCount).toBe(1);
+    const state = await readState();
+    expect(state.seenLabelIds).toEqual(['a1']);
   });
 });

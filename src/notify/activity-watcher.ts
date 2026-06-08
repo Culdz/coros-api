@@ -104,7 +104,7 @@ export class ActivityWatcher {
     await this.ensureAuth(state);
 
     const from = dayjs(this.clock.now()).subtract(days, 'day').toDate();
-    const { activities } = await this.coros.queryActivities({ from, sportTypes: [ALL_SPORT_TYPES] });
+    const activities = await this.queryFromWithAuthRetry(state, from);
     this.logger.log(`Backfill: enriching ${activities.length} activity(ies) from the last ${days} days`);
 
     const enriched: ActivityPayload[] = [];
@@ -161,22 +161,22 @@ export class ActivityWatcher {
   }
 
   private async queryRecentWithAuthRetry(state: NotifierState): Promise<Activity[]> {
+    const from = dayjs(this.clock.now()).subtract(this.config.queryWindowDays, 'day').toDate();
+    return this.queryFromWithAuthRetry(state, from);
+  }
+
+  // Query activities since `from`, re-logging in once if the (possibly cached) token is rejected.
+  private async queryFromWithAuthRetry(state: NotifierState, from: Date): Promise<Activity[]> {
     try {
-      return await this.queryRecent();
+      return (await this.coros.queryActivities({ from, sportTypes: [ALL_SPORT_TYPES] })).activities;
     } catch (error) {
       if (this.isAuthError(error)) {
         this.logger.warn('Query failed with an auth error; re-logging in and retrying');
         await this.login(state);
-        return await this.queryRecent();
+        return (await this.coros.queryActivities({ from, sportTypes: [ALL_SPORT_TYPES] })).activities;
       }
       throw error;
     }
-  }
-
-  private async queryRecent(): Promise<Activity[]> {
-    const from = dayjs(this.clock.now()).subtract(this.config.queryWindowDays, 'day').toDate();
-    const { activities } = await this.coros.queryActivities({ from, sportTypes: [ALL_SPORT_TYPES] });
-    return activities;
   }
 
   private async bootstrap(state: NotifierState, activities: Activity[]): Promise<void> {
@@ -281,11 +281,17 @@ export class ActivityWatcher {
   }
 
   private isAuthError(error: unknown): boolean {
-    return (
+    // HTTP 401 (rare for COROS) ...
+    if (
       typeof error === 'object' &&
       error !== null &&
       'response' in error &&
       (error as { response?: { status?: number } }).response?.status === 401
-    );
+    ) {
+      return true;
+    }
+    // ... or COROS's own signal: HTTP 200 with result "1019" "Access token is invalid",
+    // which base-request throws as an Error carrying `cause.result`.
+    return error instanceof Error && (error.cause as { result?: string } | undefined)?.result === '1019';
   }
 }
