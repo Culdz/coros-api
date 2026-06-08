@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 export const CorosResponseBase = z.object({
-  apiCode: z.string(),
+  // COROS error envelopes (e.g. result "1019" invalid token) omit apiCode, so it must be
+  // optional — otherwise validation fails here before the real result/message is surfaced.
+  apiCode: z.string().optional(),
   message: z.string(),
   result: z.string(),
 });

@@ -66,6 +66,52 @@ Examples:
 # Export training schedule as timed events starting at 07:30
 pnpm nest start -- export-training-schedule -o ~/Downloads --training-start 07:30
 ```
+
+## Notify Hermes about new activities
+
+Polls COROS for newly recorded activities, enriches each with metrics parsed from
+its FIT file, and notifies a [Hermes](https://hermes-agent.nousresearch.com/) agent
+via its generic webhook. After 48h without an activity, it sends an inactivity nudge.
+
+Designed to be run by cron every minute, **inside the Hermes container** (so it can
+reach the webhook on `127.0.0.1`).
+
+**Setup:**
+- Set `HERMES_WEBHOOK_URL` (and optionally `HERMES_WEBHOOK_SECRET`) in `.env` — see [.env.example](.env.example).
+- On the Hermes side, configure a webhook route whose path matches your URL
+  (e.g. `coros`), a `prompt` template that reads payload fields
+  (`{activity.name}`, `{activity.distanceKm}`, `{activity.avgHeartRate}`, …), and —
+  if you set a secret — the matching `secret`.
+
+**Run once (for testing):**
+```shell
+pnpm build
+node dist/main notify-activities
+```
+
+**Crontab (every minute):**
+```cron
+* * * * * cd /path/to/coros-api && /usr/bin/node dist/main notify-activities >> /var/log/coros-notify.log 2>&1
+```
+
+> Note: every-minute polling of the unofficial COROS API is aggressive. A gentler
+> interval (e.g. `*/5 * * * *`) works just as well — only the crontab schedule changes.
+
+**Payload shape:**
+```jsonc
+// new activity
+{ "event": "new_activity", "source": "coros",
+  "activity": { "labelId", "name", "sportType", "startTime", "endTime",
+                "durationSec", "distanceKm", "avgPaceSecPerKm",
+                "avgHeartRate", "maxHeartRate", "elevationGainM", "calories" },
+  "recentActivities": [ /* prior enriched activities */ ] }
+
+// inactivity nudge
+{ "event": "inactive", "source": "coros",
+  "inactivity": { "hoursSinceLastActivity", "lastActivity": { ... } } }
+```
+Metric fields are omitted when the FIT file does not contain them.
+
 ## API Documentation
 
 The API used by this project are documented using [Bruno](https://www.usebruno.com/) in the [api folder](./api).

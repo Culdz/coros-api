@@ -19,6 +19,6 @@ import { QueryTrainingScheduleRequest } from './training-schedule/query-training
     DownloadActivityDetailRequest,
     QueryTrainingScheduleRequest,
   ],
-  exports: [CorosAPI],
+  exports: [CorosAPI, CorosAuthenticationService],
 })
 export class CorosModule {}
