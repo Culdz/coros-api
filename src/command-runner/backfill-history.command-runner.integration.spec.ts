@@ -101,6 +101,44 @@ describe('backfill-history', () => {
     expect(endurance?.activities[0].sportType).toBe('run');
   });
 
+  it('posts each batch to its own per-sport route when configured', async () => {
+    process.env.HERMES_WEBHOOK_STRENGTH_URL = 'http://hermes.test/webhooks/coros-strength';
+    process.env.HERMES_WEBHOOK_ENDURANCE_URL = 'http://hermes.test/webhooks/coros-endurance';
+    const hits: string[] = [];
+    server.use(
+      http.post(`${COROS_API_BASE_URL}/account/login`, () => HttpResponse.json(buildLoginResponse())),
+      http.get(`${COROS_API_BASE_URL}/activity/query`, () =>
+        HttpResponse.json(
+          buildQueryActivitiesResponse({
+            activities: [
+              buildActivity({ labelId: 'run-1', sportType: 100 }),
+              buildActivity({ labelId: 'str-1', sportType: 402 }),
+            ],
+          }),
+        ),
+      ),
+      http.post(`${COROS_API_BASE_URL}/activity/detail/download`, ({ request }) => {
+        const labelId = new URL(request.url).searchParams.get('labelId');
+        return HttpResponse.json(buildDownloadActivityDetailResponse(`${COROS_API_BASE_URL}/files/${labelId}.fit`));
+      }),
+      http.get(`${COROS_API_BASE_URL}/files/*`, () => new HttpResponse('fake-fit')),
+      http.post('http://hermes.test/webhooks/coros-strength', () => {
+        hits.push('strength');
+        return HttpResponse.json({ ok: true });
+      }),
+      http.post('http://hermes.test/webhooks/coros-endurance', () => {
+        hits.push('endurance');
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+
+    await run(30);
+
+    expect(hits.sort()).toEqual(['endurance', 'strength']);
+    delete process.env.HERMES_WEBHOOK_STRENGTH_URL;
+    delete process.env.HERMES_WEBHOOK_ENDURANCE_URL;
+  });
+
   it('sends only the endurance batch when there are no strength activities', async () => {
     server.use(
       http.post(`${COROS_API_BASE_URL}/account/login`, () => HttpResponse.json(buildLoginResponse())),

@@ -4,6 +4,11 @@ import { z } from 'zod';
 
 const NotifyConfig = z.object({
   webhookUrl: z.string(),
+  // Optional per-sport routes. When set, strength goes to one Hermes route (pinned to the
+  // workout-analyzer skill) and endurance to another (run-analyzer) — so the agent never has
+  // to choose a skill. If unset, everything falls back to webhookUrl (single-route mode).
+  strengthWebhookUrl: z.string().optional(),
+  enduranceWebhookUrl: z.string().optional(),
   webhookSecret: z.string().optional(),
   stateFile: z.string().default('./.coros-state.json'),
   inactivityThresholdHours: z.preprocess((v) => (v === undefined ? undefined : Number(v)), z.number().default(48)),
@@ -25,6 +30,8 @@ export class NotifyConfigService {
     if (!this.parsed) {
       this.parsed = NotifyConfig.parse({
         webhookUrl: process.env.HERMES_WEBHOOK_URL,
+        strengthWebhookUrl: process.env.HERMES_WEBHOOK_STRENGTH_URL,
+        enduranceWebhookUrl: process.env.HERMES_WEBHOOK_ENDURANCE_URL,
         webhookSecret: process.env.HERMES_WEBHOOK_SECRET,
         stateFile: process.env.COROS_STATE_FILE,
         inactivityThresholdHours: process.env.INACTIVITY_THRESHOLD_HOURS,
@@ -37,6 +44,18 @@ export class NotifyConfigService {
   }
 
   get webhookUrl() {
+    return this.config.webhookUrl;
+  }
+
+  // The Hermes route URL for a sport category, falling back to webhookUrl when no
+  // per-sport route is configured (single-route mode).
+  webhookUrlForCategory(category: 'strength' | 'endurance'): string {
+    if (category === 'strength' && this.config.strengthWebhookUrl) {
+      return this.config.strengthWebhookUrl;
+    }
+    if (category === 'endurance' && this.config.enduranceWebhookUrl) {
+      return this.config.enduranceWebhookUrl;
+    }
     return this.config.webhookUrl;
   }
 

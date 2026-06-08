@@ -130,14 +130,21 @@ export class ActivityWatcher {
     this.logger.log(`Backfill sent: ${strength.length} strength, ${endurance.length} endurance`);
   }
 
+  private categoryFor(sportType: string): 'strength' | 'endurance' {
+    return STRENGTH_SPORTS.has(sportType) ? 'strength' : 'endurance';
+  }
+
   private async sendBackfill(sportCategory: 'strength' | 'endurance', activities: ActivityPayload[]): Promise<void> {
-    const ok = await this.notifier.notify({
-      event_type: WEBHOOK_EVENT_TYPE,
-      event: 'history_backfill',
-      source: 'coros',
-      sportCategory,
-      activities,
-    });
+    const ok = await this.notifier.notify(
+      {
+        event_type: WEBHOOK_EVENT_TYPE,
+        event: 'history_backfill',
+        source: 'coros',
+        sportCategory,
+        activities,
+      },
+      this.config.webhookUrlForCategory(sportCategory),
+    );
     if (!ok) {
       this.logger.warn(`Backfill batch '${sportCategory}' (${activities.length}) failed to deliver`);
     }
@@ -219,13 +226,16 @@ export class ActivityWatcher {
     try {
       const payload = await this.enrich(activity);
 
-      const ok = await this.notifier.notify({
-        event_type: WEBHOOK_EVENT_TYPE,
-        event: 'new_activity',
-        source: 'coros',
-        activity: payload,
-        recentActivities: state.recentActivities,
-      });
+      const ok = await this.notifier.notify(
+        {
+          event_type: WEBHOOK_EVENT_TYPE,
+          event: 'new_activity',
+          source: 'coros',
+          activity: payload,
+          recentActivities: state.recentActivities,
+        },
+        this.config.webhookUrlForCategory(this.categoryFor(payload.sportType)),
+      );
 
       if (!ok) {
         this.logger.warn(`Hermes notify failed for ${activity.labelId}; leaving unseen to retry next run`);
@@ -269,15 +279,22 @@ export class ActivityWatcher {
       return;
     }
 
-    await this.notifier.notify({
-      event_type: WEBHOOK_EVENT_TYPE,
-      event: 'inactive',
-      source: 'coros',
-      inactivity: {
-        hoursSinceLastActivity: Math.floor(hours),
-        lastActivity: state.recentActivities[0] ?? { labelId: state.lastActivityLabelId },
+    // Route the nudge to the coach for the most recent activity's sport (default endurance).
+    const last = state.recentActivities[0] as { sportType?: string } | undefined;
+    const category = last?.sportType ? this.categoryFor(last.sportType) : 'endurance';
+
+    await this.notifier.notify(
+      {
+        event_type: WEBHOOK_EVENT_TYPE,
+        event: 'inactive',
+        source: 'coros',
+        inactivity: {
+          hoursSinceLastActivity: Math.floor(hours),
+          lastActivity: state.recentActivities[0] ?? { labelId: state.lastActivityLabelId },
+        },
       },
-    });
+      this.config.webhookUrlForCategory(category),
+    );
   }
 
   private isAuthError(error: unknown): boolean {

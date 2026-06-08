@@ -14,7 +14,7 @@ export class HermesNotifier {
     this.config = config;
   }
 
-  async notify(payload: unknown): Promise<boolean> {
+  async notify(payload: unknown, url: string = this.config.webhookUrl): Promise<boolean> {
     const body = JSON.stringify(payload);
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
@@ -23,7 +23,7 @@ export class HermesNotifier {
     }
 
     try {
-      await this.httpService.axiosRef.post(this.config.webhookUrl, body, { headers });
+      await this.httpService.axiosRef.post(url, body, { headers });
       return true;
     } catch (error) {
       this.logger.error(`Failed to notify Hermes: ${error}`);
